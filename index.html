@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>Plotting Points</title>
+	<style>
+		body { font-family: sans-serif; text-align: center; }
+		#canvas { border: 1px solid #333; background: #fafafa; margin: 20px auto; display: block; }
+		#info { margin: 10px; }
+		#next-btn { margin: 10px; display: none; }
+	</style>
+</head>
+<body>
+	<h2>Plot the Point</h2>
+	<div id="info"></div>
+	<canvas id="canvas" width="500" height="500"></canvas>
+	<button id="next-btn">Next Point</button>
+	<script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const info = document.getElementById('info');
+    const nextBtn = document.getElementById('next-btn');
+    const gridMin = -10, gridMax = 10;
+    const gridSize = canvas.width;
+    const cellSize = gridSize / (gridMax - gridMin + 1);
+    let score = 0;
+    let points = [];
+    let dragging = false;
+    let dragPos = {x:0, y:0};
+    let tryAgainBtn = null;
+
+    function randomPoint() {
+      return {
+        x: Math.floor(Math.random() * 21) - 10,
+        y: Math.floor(Math.random() * 21) - 10,
+        placed: false,
+        userX: null,
+        userY: null,
+        correct: false
+      };
+    }
+
+    function gridToCanvas(x, y) {
+      return {
+        x: (x - gridMin) * cellSize,
+        y: gridSize - (y - gridMin) * cellSize
+      };
+    }
+
+    function canvasToGrid(x, y) {
+      return {
+        x: Math.round(x / cellSize + gridMin),
+        y: Math.round((gridSize - y) / cellSize + gridMin)
+      };
+    }
+
+    function drawGrid() {
+      ctx.clearRect(0,0,gridSize,gridSize);
+      // Draw grid pattern
+      ctx.strokeStyle = "#eee";
+      ctx.lineWidth = 1;
+      for (let i=gridMin; i<=gridMax; i++) {
+        let x = gridToCanvas(i, 0).x;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, gridSize);
+        ctx.stroke();
+        let y = gridToCanvas(0, i).y;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(gridSize, y);
+        ctx.stroke();
+      }
+      // Draw axes
+      ctx.strokeStyle = "#333";
+      ctx.lineWidth = 2;
+      let y0 = gridToCanvas(0, 0).y;
+      ctx.beginPath();
+      ctx.moveTo(0, y0);
+      ctx.lineTo(gridSize, y0);
+      ctx.stroke();
+      let x0 = gridToCanvas(0, 0).x;
+      ctx.beginPath();
+      ctx.moveTo(x0, 0);
+      ctx.lineTo(x0, gridSize);
+      ctx.stroke();
+      // Draw labels
+      ctx.fillStyle = "#000";
+      ctx.font = "16px sans-serif";
+      for (let i=gridMin; i<=gridMax; i++) {
+        // x-axis numbers: centered below each vertical grid line
+        let ptX = gridToCanvas(i, gridMin);
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(i, ptX.x, ptX.y + 18);
+        // y-axis numbers: centered left of each horizontal grid line
+        let ptY = gridToCanvas(gridMin, i);
+        ctx.textAlign = "right";
+        ctx.textBaseline = "middle";
+        ctx.fillText(i, ptY.x - 18, ptY.y);
+      }
+      // Axis labels
+      ctx.font = "bold 16px sans-serif";
+      ctx.fillStyle = "#000";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillText("x", gridToCanvas(gridMax, gridMin).x + 24, gridToCanvas(0, gridMin).y + 24);
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      ctx.fillText("y", gridToCanvas(gridMin, gridMax).x - 24, gridToCanvas(gridMin, gridMax).y - 8);
+    }
+
+    function drawDraggable(x, y) {
+      let pt = gridToCanvas(x, y);
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, 12, 0, 2*Math.PI);
+      ctx.fillStyle = "#1976d2";
+      ctx.fill();
+      ctx.strokeStyle = "#333";
+      ctx.stroke();
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 16px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("?", pt.x, pt.y);
+    }
+
+    function drawPlaced(x, y) {
+      let pt = gridToCanvas(x, y);
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, 10, 0, 2*Math.PI);
+      ctx.fillStyle = "#43a047";
+      ctx.fill();
+      ctx.strokeStyle = "#333";
+      ctx.stroke();
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 14px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("✔", pt.x, pt.y);
+    }
+
+    function drawIncorrect(x, y) {
+      let pt = gridToCanvas(x, y);
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, 10, 0, 2*Math.PI);
+      ctx.fillStyle = "#e53935";
+      ctx.fill();
+      ctx.strokeStyle = "#333";
+      ctx.stroke();
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 14px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("✖", pt.x, pt.y);
+    }
+
+    function render() {
+      drawGrid();
+      // Draw all previous points
+      for (let i=0; i<points.length; i++) {
+        if (points[i].placed) {
+          if (points[i].correct) {
+            drawPlaced(points[i].userX, points[i].userY);
+          } else {
+            drawIncorrect(points[i].userX, points[i].userY);
+          }
+        }
+      }
+      // Draw draggable for current point if not placed
+      let current = points[points.length-1];
+      if (!current.placed) {
+        let dragCoords = dragging ? dragPos : {x: 0, y: 0};
+        drawDraggable(dragCoords.x, dragCoords.y);
+        // Show coordinate pair under the mobile point
+        let pt = gridToCanvas(dragCoords.x, dragCoords.y);
+        ctx.fillStyle = "#000";
+        ctx.font = "bold 14px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(`(${dragCoords.x}, ${dragCoords.y})`, pt.x, pt.y + 18);
+      }
+      // Draw score
+      ctx.fillStyle = "#000";
+      ctx.font = "bold 18px sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillText(`Score: ${score}`, 10, 10);
+    }
+
+    function showInfo() {
+      let current = points[points.length-1];
+      if (!current.placed) {
+        info.textContent = `Drag the point (${current.x}, ${current.y}) to its correct location on the grid.`;
+        nextBtn.style.display = "none";
+        if (tryAgainBtn) tryAgainBtn.style.display = "none";
+      } else if (current.correct) {
+        info.textContent = `Correct! You plotted (${current.x}, ${current.y}) successfully.`;
+        nextBtn.style.display = "inline-block";
+        if (tryAgainBtn) tryAgainBtn.style.display = "none";
+      } else {
+        info.textContent = `Incorrect. Try again?`;
+        nextBtn.style.display = "none";
+        if (!tryAgainBtn) {
+          tryAgainBtn = document.createElement('button');
+          tryAgainBtn.textContent = "Try Again";
+          tryAgainBtn.style.margin = "10px";
+          tryAgainBtn.onclick = function() {
+            score = 0;
+            points = [randomPoint()];
+            showInfo();
+            render();
+            tryAgainBtn.style.display = "none";
+          };
+          info.parentNode.insertBefore(tryAgainBtn, nextBtn);
+        }
+        tryAgainBtn.style.display = "inline-block";
+      }
+    }
+
+    function startDrag(e) {
+      let current = points[points.length-1];
+      if (current.placed) return;
+      dragging = true;
+      dragPos = {x: 0, y: 0}; // start drag at origin
+    }
+
+    function moveDrag(e) {
+      if (!dragging) return;
+      let rect = canvas.getBoundingClientRect();
+      let x = e.clientX - rect.left;
+      let y = e.clientY - rect.top;
+      let grid = canvasToGrid(x, y);
+      dragPos = grid;
+      render();
+    }
+
+    function endDrag(e) {
+      if (!dragging) return;
+      dragging = false;
+      let rect = canvas.getBoundingClientRect();
+      let x = e.clientX - rect.left;
+      let y = e.clientY - rect.top;
+      let grid = canvasToGrid(x, y);
+      // Check if within grid bounds
+      if (grid.x < gridMin || grid.x > gridMax || grid.y < gridMin || grid.y > gridMax) {
+        showInfo();
+        render();
+        return;
+      }
+      let current = points[points.length-1];
+      // Only mark as placed if correct
+      if (grid.x === current.x && grid.y === current.y) {
+        current.placed = true;
+        current.userX = grid.x;
+        current.userY = grid.y;
+        current.correct = true;
+        score++;
+      } else {
+        // Allow unlimited attempts, show incorrect feedback
+        current.placed = false;
+        current.correct = false;
+      }
+      showInfo();
+      render();
+    }
+
+    canvas.addEventListener('mousedown', startDrag);
+    canvas.addEventListener('mousemove', moveDrag);
+    canvas.addEventListener('mouseup', endDrag);
+    canvas.addEventListener('mouseleave', () => { dragging = false; });
+
+    nextBtn.addEventListener('click', () => {
+      // Only allow next if previous was correct
+      let current = points[points.length-1];
+      if (current.correct) {
+        points.push(randomPoint());
+        showInfo();
+        render();
+      }
+    });
+
+    // Initialize with one point
+    points = [randomPoint()];
+    showInfo();
+    render();
+	</script>
+</body>
+</html>
